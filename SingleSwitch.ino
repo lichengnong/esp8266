@@ -13,8 +13,8 @@ void lightOn();
 void lightOff();
 
 //------- Replace the following! ------
-char ssid[] = "CCHOME";       // your network SSID (name)
-char password[] = "angela18";  // your network key
+char ssid[] = "xxxxx";       // your network SSID (name)
+char password[] = "xxxxxx";  // your network key
 
 WemoManager wemoManager;
 WemoSwitch *light = NULL;
