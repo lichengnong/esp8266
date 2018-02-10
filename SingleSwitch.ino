@@ -18,8 +18,8 @@ void manualToggle();
 
 //------- Replace the following! ------
 const char* host = "dining-light";
-char ssid[] = "CCHOME";       // your network SSID (name)
-char password[] = "angela18";  // your network key
+char ssid[] = "xxxx";       // your network SSID (name)
+char password[] = "xxxxx";  // your network key
 
 WemoManager wemoManager;
 WemoSwitch *light = NULL;
