@@ -17,6 +17,7 @@ int lightOn();
 int lightOff();
 int getLightState();
 void manualToggle();
+void publishLightState();
 
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void mqttReconnect();
@@ -36,6 +37,7 @@ void dhtRead();
 
 volatile byte lightState;
 volatile unsigned long last_light_toggle_time = 0;
+volatile byte pendingPublish = 0;
 
 WemoManager wemoManager;
 WemoSwitch *light = NULL;
@@ -151,14 +153,14 @@ void loop()
 
   wemoManager.serverLoop();
 
+  publishLightState();
+  
   httpServer.handleClient();
 }
 
 int lightOn() {
     last_light_toggle_time = millis();
     
-    Serial.println("Switch turned on ...");
-
     lightState = LIGHT_ON;
 
     digitalWrite(0, LOW);
@@ -166,17 +168,13 @@ int lightOn() {
     EEPROM.write(LIGHT_STATE_EEPROM_ADDR, LIGHT_ON);
     EEPROM.commit();
 
-    if (mqttClient.connected()) {
-       mqttClient.publish(LightStateTopic, "ON", true);
-    }
+    pendingPublish = 1;
 
     return 1;
 }
 
 int lightOff() {
     last_light_toggle_time = millis();
-
-    Serial.println("Switch turned off ...");
 
     lightState = LIGHT_OFF;
 
@@ -185,29 +183,35 @@ int lightOff() {
     EEPROM.write(LIGHT_STATE_EEPROM_ADDR, LIGHT_OFF);
     EEPROM.commit();
 
-    if (mqttClient.connected()) {
-       mqttClient.publish(LightStateTopic, "OFF", true);
-    }
+    pendingPublish = 1;
     
     return 0;
 }
 
 int getLightState() {
-    Serial.println("Switch state query ...");
-
     if (lightState == LIGHT_OFF)
        return 0;
     else
        return 1;
 }
 
+voiid publishLightState() {
+  if (pendingPublish == 1) {
+    if (mqttClient.connected()) {
+      if (lightState == LIGHT_OFF)
+          mqttClient.publish(LightStateTopic, "OFF", true);
+      else
+          mqttClient.publish(LightStateTopic, "ON", true);
+    }
+    pendingPublish = 0;
+  }
+}
+
 void manualToggle() {
    unsigned long interrupt_time = millis();
    // If interrupts come faster than 800ms, assume it's a bounce and ignore
-   if (interrupt_time - last_light_toggle_time > 800) 
+   if (interrupt_time - last_light_toggle_time > 500) 
    {
-     Serial.println("Manual Toggle Triggered");
-
      if (lightState == LIGHT_ON)
        lightOff();
      else
@@ -216,13 +220,13 @@ void manualToggle() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
+  //Serial.print("Message arrived [");
+  //Serial.print(topic);
+  //Serial.print("] ");
+  //for (int i = 0; i < length; i++) {
+  //  Serial.print((char)payload[i]);
+  //}
+  //Serial.println();
 
   if (payload[0] == 'O' && payload[1] == 'N') 
     lightOn();
