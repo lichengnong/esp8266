@@ -85,7 +85,7 @@ void setup()
 
   last_light_toggle_time = millis();
 
-  if (lightState == LIGHT_ON)
+  if (getLightState())
   {
     Serial.println("\nInitial light state is ON");
     digitalWrite(0, LOW);
@@ -148,13 +148,13 @@ void loop()
   mqttReconnect();
 
   mqttClient.loop();
-
+ 
+  publishLightState();
+ 
   dhtRead();
 
   wemoManager.serverLoop();
-
-  publishLightState();
-  
+ 
   httpServer.handleClient();
 }
 
@@ -189,20 +189,21 @@ int lightOff() {
 }
 
 int getLightState() {
-    if (lightState == LIGHT_OFF)
-       return 0;
-    else
+    if (lightState == LIGHT_ON)
        return 1;
+    else
+       return 0;
 }
 
 voiid publishLightState() {
   if (pendingPublish == 1) {
     if (mqttClient.connected()) {
-      if (lightState == LIGHT_OFF)
-          mqttClient.publish(LightStateTopic, "OFF", true);
-      else
+      if (getLightState())
           mqttClient.publish(LightStateTopic, "ON", true);
+      else
+          mqttClient.publish(LightStateTopic, "OFF", true);
     }
+    
     pendingPublish = 0;
   }
 }
@@ -212,7 +213,7 @@ void manualToggle() {
    // If interrupts come faster than 800ms, assume it's a bounce and ignore
    if (interrupt_time - last_light_toggle_time > 500) 
    {
-     if (lightState == LIGHT_ON)
+     if (getLightState())
        lightOff();
      else
         lightOn();
@@ -256,7 +257,7 @@ void mqttReconnect() {
 
         mqttClient.publish(LightAvailabilityTopic, "online", true);
 
-        if (lightState == LIGHT_ON)
+        if (getLightState())
           mqttClient.publish(LightStateTopic, "ON", true);
         else
           mqttClient.publish(LightStateTopic, "OFF", true);
