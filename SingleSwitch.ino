@@ -25,10 +25,10 @@ void mqttReconnect();
 void dhtRead();
 
 //------- Replace the following! ------
-#define HOST "dining-light"
-#define SSID "xxxxx"       // your network SSID (name)
-#define PASSWORD "xxxxx"  // your network key
-#define LIGHT_NAME "dining light"
+#define HOST "sink-light"
+#define SSID "xxxxxx"       // your network SSID (name)
+#define PASSWORD "xxxxxx"  // your network key
+#define LIGHT_NAME "sink light"
 
 #define LIGHT_ON 78
 #define LIGHT_OFF 80
@@ -55,11 +55,11 @@ WiFiClient wifiClient;
 
 PubSubClient mqttClient(wifiClient);
 
-#define LightStateTopic "home/light/dining-light/state"
-#define LightSwitchTopic "home/light/dining-light/switch"
-#define LightAvailabilityTopic "home/light/dining-light/available"
-#define TemperatureSensorTopic "home/sensor/hall/temperature"
-#define HumiditySensorTopic "home/sensor/hall/humidity"
+#define LightStateTopic "home/light/sink-light/state"
+#define LightSwitchTopic "home/light/sink-light/switch"
+#define LightAvailabilityTopic "home/light/sink-light/available"
+#define TemperatureSensorTopic "home/sensor/kitchen/temperature"
+#define HumiditySensorTopic "home/sensor/kitchen/humidity"
 
 void setup()
 {
@@ -148,12 +148,12 @@ void loop()
   mqttReconnect();
 
   mqttClient.loop();
- 
+
+  wemoManager.serverLoop();
+
   publishLightState();
  
   dhtRead();
-
-  wemoManager.serverLoop();
  
   httpServer.handleClient();
 }
@@ -195,7 +195,7 @@ int getLightState() {
        return 0;
 }
 
-voiid publishLightState() {
+void publishLightState() {
   if (pendingPublish == 1) {
     if (mqttClient.connected()) {
       if (getLightState())
@@ -257,10 +257,7 @@ void mqttReconnect() {
 
         mqttClient.publish(LightAvailabilityTopic, "online", true);
 
-        if (getLightState())
-          mqttClient.publish(LightStateTopic, "ON", true);
-        else
-          mqttClient.publish(LightStateTopic, "OFF", true);
+        pendingPublish = 1;
       } else {
         Serial.println("failed");
       }
