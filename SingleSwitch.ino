@@ -25,10 +25,10 @@ void mqttReconnect();
 void dhtRead();
 
 //------- Replace the following! ------
-#define HOST "sink-light"
-#define SSID "xxxxxx"       // your network SSID (name)
-#define PASSWORD "xxxxxx"  // your network key
-#define LIGHT_NAME "sink light"
+#define HOST "stair-light"
+#define SSID "XXXX"       // your network SSID (name)
+#define PASSWORD "XXXX"  // your network key
+#define LIGHT_NAME "stair light"
 
 #define LIGHT_ON 78
 #define LIGHT_OFF 80
@@ -55,11 +55,11 @@ WiFiClient wifiClient;
 
 PubSubClient mqttClient(wifiClient);
 
-#define LightStateTopic "home/light/sink-light/state"
-#define LightSwitchTopic "home/light/sink-light/switch"
-#define LightAvailabilityTopic "home/light/sink-light/available"
-#define TemperatureSensorTopic "home/sensor/kitchen/temperature"
-#define HumiditySensorTopic "home/sensor/kitchen/humidity"
+#define LightStateTopic "home/light/stair-light/state"
+#define LightSwitchTopic "home/light/stair-light/switch"
+#define LightAvailabilityTopic "home/light/stair-light/available"
+#define TemperatureSensorTopic "home/sensor/stair/temperature"
+#define HumiditySensorTopic "home/sensor/stair/humidity"
 
 void setup()
 {
@@ -88,17 +88,17 @@ void setup()
   if (getLightState())
   {
     Serial.println("\nInitial light state is ON");
-    digitalWrite(0, LOW);
+    digitalWrite(0, HIGH);
   }
   else
   {
     Serial.println("\nInitial light state is OFF");
-    digitalWrite(0, HIGH);
+    digitalWrite(0, LOW);
   }
 
   attachInterrupt(digitalPinToInterrupt(3), manualToggle, CHANGE);
 
-  delay(100);
+  delay(10);
   
   // Set WiFi to station mode and disconnect from an AP if it was Previously
   // connected
@@ -125,7 +125,7 @@ void setup()
   light = new WemoSwitch(LIGHT_NAME, 81, lightOn, lightOff, getLightState);
   wemoManager.addDevice(*light);
 
-  delay(100);
+  delay(10);
 
   MDNS.begin(HOST);
 
@@ -135,26 +135,36 @@ void setup()
   MDNS.addService("http", "tcp", 80);
   Serial.printf("HTTPUpdateServer ready! Open http://%s.local/update in your browser\n", HOST);
 
-  delay(100);
+  delay(10);
 
   mqttClient.setServer(MQTT_SERVER, 1883);
   mqttClient.setCallback(mqttCallback);
 
-  delay(100);
+  delay(10);
 }
 
 void loop()
 {
   mqttReconnect();
 
+  yield(); 
+
   mqttClient.loop();
 
+  yield();
+  
   wemoManager.serverLoop();
 
+  yield();
+  
   publishLightState();
- 
+
+  yield();
+  
   dhtRead();
- 
+
+  yield();
+  
   httpServer.handleClient();
 }
 
@@ -163,7 +173,7 @@ int lightOn() {
     
     lightState = LIGHT_ON;
 
-    digitalWrite(0, LOW);
+    digitalWrite(0, HIGH);
 
     EEPROM.write(LIGHT_STATE_EEPROM_ADDR, LIGHT_ON);
     EEPROM.commit();
@@ -178,7 +188,7 @@ int lightOff() {
 
     lightState = LIGHT_OFF;
 
-    digitalWrite(0, HIGH);
+    digitalWrite(0, LOW);
 
     EEPROM.write(LIGHT_STATE_EEPROM_ADDR, LIGHT_OFF);
     EEPROM.commit();
@@ -273,11 +283,16 @@ void dhtRead() {
     // Reading temperature or humidity takes about 250 milliseconds!
     // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
     float h = dht.readHumidity();
+
+    yield();
+    
     // Read temperature as Celsius (the default)
     // float t = dht.readTemperature();
     // Read temperature as Fahrenheit (isFahrenheit = true)
     float f = dht.readTemperature(true);
-  
+
+    yield();
+    
     // Check if any reads failed and exit early (to try again).
     if (isnan(h) || isnan(f)) {
       Serial.println("Failed to read from DHT sensor!");
