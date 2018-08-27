@@ -200,7 +200,9 @@ void toggleSlowCooker() {
         pendingStatePublish = 1;
       }
   }
-  else if ((foodTemp >= targetFoodTemp) || (cookingEndTime - now <= 0)) {
+  else if ((foodTemp >= targetFoodTemp) || 
+           ((slowCookerState == SC_IN_COOKING_ON || 
+             slowCookerState == SC_IN_COOKING_OFF) && (cookingEndTime <= now)) {
       // turn off
       if (slowCookerState != SC_OFF) {
         last_slow_cooker_toggle_time = now;
@@ -422,9 +424,9 @@ void readT() {
   if ((now - lastReadAttempt) > 3000) {
     lastReadAttempt = now;
 
-    Serial.print("Requesting temperatures...");
+    //Serial.print("Requesting temperatures...");
     DS18B20.requestTemperatures(); // Send the command to get temperatures
-    Serial.println("DONE");
+    //Serial.println("DONE");
     // After we got the temperatures, we can print them here.
     // We use the function ByIndex, and as an example get the temperature from the first sensor only.
 
@@ -432,15 +434,15 @@ void readT() {
 
     cookingTemp = DallasTemperature::toFahrenheit(c);
   
-    Serial.print("Temperature for the cooking (id 0) is: ");
-    Serial.println(cookingTemp);
+    //Serial.print("Temperature for the cooking (id 0) is: ");
+    //Serial.println(cookingTemp);
 
     c = getTempByID(1);
 
     foodTemp = DallasTemperature::toFahrenheit(c);
   
-    Serial.print("Temperature for the food (id 1) is: ");
-    Serial.println(foodTemp);
+    //Serial.print("Temperature for the food (id 1) is: ");
+    //Serial.println(foodTemp);
 
     yield();
   
