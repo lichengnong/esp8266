@@ -421,7 +421,7 @@ float getTempByID(int id)
 void readT() {
   static unsigned long lastReadAttempt = 0;
   unsigned long now = millis();
-  if ((now - lastReadAttempt) > 3000) {
+  if ((now - lastReadAttempt) > 2000) {
     lastReadAttempt = now;
 
     //Serial.print("Requesting temperatures...");
