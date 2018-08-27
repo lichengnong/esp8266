@@ -11,38 +11,54 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+struct
+{
+  int id;
+  DeviceAddress addr;
+} T[4];
+
 // prototypes
 
 // on/off/state callbacks
-int slowCookerOn();
-int slowCookerOff();
 int getSlowCookerState();
 void toggleSlowCooker();
 void publishSlowCookerState();
+float getTempByID(int id);
+void readT();
 
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void mqttReconnect();
 
 //------- Replace the following! ------
 #define HOST "SlowCooker"
-#define SSID "XXXX"       // your network SSID (name)
-#define PASSWORD "XXXX"  // your network key
+#define SSID "XXXXX"       // your network SSID (name)
+#define PASSWORD "XXXXX"  // your network key
 #define DEVICE_NAME "slow_cooker"
 
-#define SLOW_COOKER_SETTING_EEPROM_ADDR 0
+#define SC_OFF 0
+#define SC_IN_DELAY 1
+#define SC_IN_COOKING_OFF 2
+#define SC_IN_COOKING_ON 3
 
-volatile byte slowCookerState;
-volatile byte slowCookerSetting;
-volatile byte pendingPublish = 0;
+volatile byte slowCookerState = SC_OFF;
+volatile byte targetFoodTemp = 0;
+volatile byte targetCookingTemp = 0;
+volatile float cookingTemp;
+volatile float foodTemp;
+volatile unsigned long targetDelayTime = 0;
+volatile unsigned long targetCookingTime = 0;
+volatile unsigned long delayEndTime = 0;
+volatile unsigned long cookingEndTime = 0;
 
-volatile float f;
+volatile byte pendingStatePublish = 0;
 
 #define ONE_WIRE_BUS 2  // GPIO 2
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
+uint8_t deviceCount = 0;
 
 //WemoManager wemoManager;
-//WemoSwitch *dehumidifier = NULL;
+//WemoSwitch *slowCooker = NULL;
 
 ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
@@ -54,39 +70,44 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
 #define SlowCookerStateTopic "home/slowcooker/state"
-#define SlowCookerSettingTopic "home/slowcooker/setting"
+#define SlowCookerSetDelayTimeTopic "home/slowcooker/setdelaytime"
+#define SlowCookerSetTargetCookingTempTopic "home/slowcooker/setcookingtemp"
+#define SlowCookerSetTargetFoodTempTopic "home/slowcooker/setfoodtemp"
+#define SlowCookerSetCookingTimeTopic "home/slowcooker/setcookingtime"
+#define SlowCookerSwitchCommandTopic "home/slowcooker/switch/set"
+#define SlowCookerSwitchStateTopic "home/slowcooker/switch/state"
 #define SlowCookerAvailabilityTopic "home/slowcooker/available"
-#define SlowCookerTemperatureSensorTopic "home/slowcooker/temperature"
+#define SlowCookerCookingTempSensorTopic "home/slowcooker/cookingtemp"
+#define SlowCookerFoodTempSensorTopic "home/slowcooker/foodtemp"
+#define SlowCookerTimeRemainingSensorTopic "home/slowcooker/timeremaining"
+#define SlowCookerSetupTopic "home/slowcooker/setup"
 
 void setup()
 {
   pinMode(0, OUTPUT);
-  pinMode(3, OUTPUT);
 
   Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY, 1);
 
-  EEPROM.begin(64);
-  
-  slowCookerSetting = EEPROM.read(SLOW_COOKER_SETTING_EEPROM_ADDR);
+  DS18B20.begin();
 
-  if (slowCookerSetting < 120 || slowCookerSetting > 195)
+  // count devices
+  deviceCount = DS18B20.getDeviceCount();
+  Serial.print("#devices: ");
+  Serial.println(deviceCount);
+
+  // Read ID's per sensor
+  // and put them in T array
+  for (uint8_t index = 0; index < deviceCount; index++)
   {
-    //initialize
-    slowCookerSetting = 0;
-
-    Serial.print("Initialize eeprom slow cooker setting = ");
-    Serial.println(slowCookerSetting);
-    EEPROM.write(SLOW_COOKER_SETTING_EEPROM_ADDR, slowCookerSetting);
-    EEPROM.commit();
+    // go through sensors
+    DS18B20.getAddress(T[index].addr, index);
+    T[index].id = DS18B20.getUserData(T[index].addr);
   }
-
-  Serial.print("\nInitial slow cooker setting is ");
-  Serial.println(slowCookerSetting);
 
   //turn off slow cooker at the beginning
   digitalWrite(0, HIGH);
-  slowCookerState = 0;
-  
+  slowCookerState = SC_OFF;
+
   delay(10);
   
   // Set WiFi to station mode and disconnect from an AP if it was Previously
@@ -114,7 +135,7 @@ void setup()
   // wemoManager.begin();
   // Format: Alexa invocation name, local port no, on callback, off callback
   //  dehumidifier = new WemoSwitch(DEVICE_NAME, 81, dehumidifierOn, dehumidifierOff, getDehumidifierState);
-  //  wemoManager.addDevice(*dehumidifier);
+  //  wemoManager.addDevice(*slowCooker);
 
   delay(10);
 
@@ -131,11 +152,7 @@ void setup()
   mqttClient.setServer(MQTT_SERVER, 1883);
   mqttClient.setCallback(mqttCallback);
 
-  delay(1000);
-
-  DS18B20.begin();
-
-  delay(1000);
+  delay(2000);
 }
 
 void loop()
@@ -167,45 +184,55 @@ void loop()
 }
 
 void toggleSlowCooker() {
-  static long last_slow_cooker_toggle_time = 0;
+  static unsigned long last_slow_cooker_toggle_time = 0;
 
-  if (slowCookerSetting == 0) { //OFF
-    if (slowCookerState == 1) {
-      digitalWrite(0, HIGH);
-      slowCookerState = 0;
-      pendingPublish = 1;
-    }
+  if (slowCookerState == SC_OFF)
     return;
-  }
 
-  if (isnan(f)) {
-      if (slowCookerState == 1) {
-        // turn off slowCooker if unknown humidity
-        digitalWrite(0, HIGH);
-        slowCookerState = 0;
-        pendingPublish = 1;
-      }
-      return;
-  }
+  unsigned long now = millis();
 
-  if ( (f < (slowCookerSetting - 2)) && (slowCookerState == 0)) {
-      // turn on
-      unsigned long now = millis();
-      if (now - last_slow_cooker_toggle_time > 60000) {
-        last_slow_cooker_toggle_time = now;
-        digitalWrite(0, LOW);
-        slowCookerState = 1;
-        pendingPublish = 1;
-      }
-  }
-  else if ( (f > (slowCookerSetting + 2)) && (slowCookerState == 1)) {
+  if (isnan(cookingTemp) || isnan(foodTemp)) {
       // turn off
-      unsigned long now = millis();
-      if (now - last_slow_cooker_toggle_time > 60000) {
+      if (slowCookerState != SC_OFF) {
         last_slow_cooker_toggle_time = now;
         digitalWrite(0, HIGH);
-        slowCookerState = 0;
-        pendingPublish = 1;
+        slowCookerState = SC_OFF;
+        pendingStatePublish = 1;
+      }
+  }
+  else if ((foodTemp >= targetFoodTemp) || (cookingEndTime - now <= 0)) {
+      // turn off
+      if (slowCookerState != SC_OFF) {
+        last_slow_cooker_toggle_time = now;
+        digitalWrite(0, HIGH);
+        slowCookerState = SC_OFF;
+        pendingStatePublish = 1;
+      }
+  } 
+  else if (slowCookerState == SC_IN_DELAY) {
+      if (delayEndTime < now) {
+        cookingEndTime = targetCookingTime*60000 + now;
+        slowCookerState = SC_IN_COOKING_OFF;
+        pendingStatePublish = 1;
+      }
+  }
+  else if (slowCookerState == SC_IN_COOKING_OFF) {
+      if (cookingTemp < (targetCookingTemp - 3)) {
+        // turn on
+        if (now - last_slow_cooker_toggle_time > 60000) {
+          digitalWrite(0, LOW);
+          slowCookerState = SC_IN_COOKING_ON;
+          pendingStatePublish = 1;
+        }
+      }
+  }
+  else if (slowCookerState == SC_IN_COOKING_ON) {
+      if (cookingTemp >= targetCookingTemp) {
+        // turn off
+        last_slow_cooker_toggle_time = now;
+        digitalWrite(0, HIGH);
+        slowCookerState = SC_IN_COOKING_OFF;
+        pendingStatePublish = 1;
       }
   }
 }
@@ -215,15 +242,49 @@ int getSlowCookerState() {
 }
 
 void publishSlowCookerState() {
-  if (pendingPublish == 1) {
+  if (getSlowCookerState() != SC_OFF) {
+     static unsigned long lastReportAttempt = 0;
+     unsigned long now = millis();
+     
+     if ((now - lastReportAttempt) > 60000) {
+        lastReportAttempt = now;
+
+        int timeRemaining = 0;
+        if (getSlowCookerState() == SC_IN_DELAY)
+          timeRemaining = (delayEndTime > now ? delayEndTime - now : 0)/60000;
+        else
+          timeRemaining = (cookingEndTime > now ? cookingEndTime - now : 0)/60000;
+      
+        mqttClient.publish(SlowCookerTimeRemainingSensorTopic, String(timeRemaining).c_str(), false);
+     }
+  }
+  
+  if (pendingStatePublish == 1) {
     if (mqttClient.connected()) {
-      if (getSlowCookerState())
-          mqttClient.publish(SlowCookerStateTopic, "ON", true);
-      else
+      switch (getSlowCookerState()) {
+      case SC_OFF: 
           mqttClient.publish(SlowCookerStateTopic, "OFF", true);
+          mqttClient.publish(SlowCookerSwitchStateTopic, "OFF", true);
+          mqttClient.publish(SlowCookerTimeRemainingSensorTopic, "0", false);
+          break;
+      case SC_IN_DELAY: 
+          mqttClient.publish(SlowCookerStateTopic, "DELAY", true);
+          mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          break;
+      case SC_IN_COOKING_OFF: 
+          mqttClient.publish(SlowCookerStateTopic, "OFFHEAT", true);
+          mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          break;
+      case SC_IN_COOKING_ON: 
+          mqttClient.publish(SlowCookerStateTopic, "ONHEAT", true);
+          mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          break;
+      default:
+          break;
+      }
     }
     
-    pendingPublish = 0;
+    pendingStatePublish = 0;
   }
 }
 
@@ -236,8 +297,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   //}
   //Serial.println();
 
- char buf[10];
- if (length < 10) {
+  char buf[10];
+
+  if (length >= 10) 
+   return;
+ 
   for (int i=0; i<length; ++i)
     buf[i] = payload[i];
   buf[length] = '\0';
@@ -245,17 +309,69 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String p(buf);
   int pn = p.toInt();
 
-  if (pn == 0 || (pn >= 120 && pn <= 195)){
-    slowCookerSetting = pn;
-    EEPROM.write(SLOW_COOKER_SETTING_EEPROM_ADDR, slowCookerSetting);
-    EEPROM.commit();
+  unsigned long now = millis();
+
+  if (!strcmp(topic, SlowCookerSetupTopic)) {
+     // label device
+     for (uint8_t index = 0; index < deviceCount; ++index)
+      DS18B20.setUserDataByIndex(index, index);
   }
- } 
+  else if (!strcmp(topic, SlowCookerSetDelayTimeTopic)) {
+     targetDelayTime = pn*60*1000;
+
+     if (slowCookerState == SC_IN_COOKING_ON || slowCookerState == SC_IN_COOKING_OFF)
+        return;
+
+     if (slowCookerState == SC_IN_DELAY) {
+        if (pn == 0) {
+            slowCookerState = SC_IN_COOKING_OFF;
+            pendingStatePublish = 1;
+        }
+        else
+          delayEndTime = targetDelayTime*60000 + now;
+     }
+  }
+  else if (!strcmp(topic, SlowCookerSetCookingTimeTopic)) {
+      targetCookingTime = pn*60000;
+
+      if (slowCookerState == SC_IN_COOKING_OFF || SC_IN_COOKING_ON)
+         cookingEndTime = targetCookingTime*60000 + now;
+  }
+  else if (!strcmp(topic, SlowCookerSetTargetCookingTempTopic)) {
+      targetCookingTemp = pn;
+  }
+  else if (!strcmp(topic, SlowCookerSetTargetFoodTempTopic)) {
+      targetFoodTemp = pn;
+  }
+  else if (!strcmp(topic, SlowCookerSwitchCommandTopic)) {
+    if (pn == 0) {
+      if (slowCookerState != SC_OFF) {
+        slowCookerState = SC_OFF;
+        digitalWrite(0, HIGH);
+        pendingStatePublish = 1;
+      }
+    }
+    else if (pn == 1) {
+      if (slowCookerState != SC_OFF)
+        digitalWrite(0, HIGH);
+      
+      if (targetDelayTime > 0) {
+          slowCookerState = SC_IN_DELAY;
+          delayEndTime = targetDelayTime*60000 + now;
+          pendingStatePublish = 1;
+      }
+      else {
+        slowCookerState = SC_IN_COOKING_OFF;
+        cookingEndTime = targetCookingTime*60000 + now;
+        pendingStatePublish = 1;
+      }
+    }
+  }
 }
 
 void mqttReconnect() {
-  static long lastReconnectAttempt = 0;
-  long now = millis();
+  static unsigned long lastReconnectAttempt = 0;
+  unsigned long now = millis();
   if ((now - lastReconnectAttempt) > 6000) {
     lastReconnectAttempt = now;
     
@@ -271,11 +387,16 @@ void mqttReconnect() {
       if (mqttClient.connect(clientId.c_str(), SlowCookerAvailabilityTopic, 0, true, "offline")) {
         Serial.println("connected");
 
-        mqttClient.subscribe(SlowCookerSettingTopic);
+        mqttClient.subscribe(SlowCookerSetDelayTimeTopic);
+        mqttClient.subscribe(SlowCookerSetCookingTimeTopic);
+        mqttClient.subscribe(SlowCookerSetTargetFoodTempTopic);
+        mqttClient.subscribe(SlowCookerSetTargetCookingTempTopic);
+        mqttClient.subscribe(SlowCookerSwitchCommandTopic);
+        mqttClient.subscribe(SlowCookerSetupTopic);
 
         mqttClient.publish(SlowCookerAvailabilityTopic, "online", true);
 
-        pendingPublish = 1;
+        pendingStatePublish = 1;
       } else {
         Serial.println("failed");
       }
@@ -283,9 +404,21 @@ void mqttReconnect() {
   }
 }
 
+float getTempByID(int id)
+{
+  for (uint8_t index = 0; index < deviceCount; index++)
+  {
+    if (T[index].id == id)
+    {
+      return DS18B20.getTempC(T[index].addr);
+    }
+  }
+  return 999;
+}
+
 void readT() {
-  static long lastReadAttempt = 0;
-  long now = millis();
+  static unsigned long lastReadAttempt = 0;
+  unsigned long now = millis();
   if ((now - lastReadAttempt) > 3000) {
     lastReadAttempt = now;
 
@@ -295,17 +428,25 @@ void readT() {
     // After we got the temperatures, we can print them here.
     // We use the function ByIndex, and as an example get the temperature from the first sensor only.
 
-    float c = DS18B20.getTempCByIndex(0);
+    float c = getTempByID(0);
 
-    f = DallasTemperature::toFahrenheit(c);
+    cookingTemp = DallasTemperature::toFahrenheit(c);
   
-    Serial.print("Temperature for the device 1 (index 0) is: ");
-    Serial.println(f);
+    Serial.print("Temperature for the cooking (id 0) is: ");
+    Serial.println(cookingTemp);
+
+    c = getTempByID(1);
+
+    foodTemp = DallasTemperature::toFahrenheit(c);
+  
+    Serial.print("Temperature for the food (id 1) is: ");
+    Serial.println(foodTemp);
 
     yield();
   
     if (mqttClient.connected()) {
-      mqttClient.publish(SlowCookerTemperatureSensorTopic, String(f).c_str(), false);
+      mqttClient.publish(SlowCookerCookingTempSensorTopic, String(cookingTemp).c_str(), false);
+      mqttClient.publish(SlowCookerFoodTempSensorTopic, String(foodTemp).c_str(), false);
     }
   }
 }
