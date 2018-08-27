@@ -50,7 +50,7 @@ volatile unsigned long targetCookingTime = 0;
 volatile unsigned long delayEndTime = 0;
 volatile unsigned long cookingEndTime = 0;
 
-volatile byte pendingStatePublish = 0;
+volatile byte pendingStatePublish = 1;
 
 #define ONE_WIRE_BUS 2  // GPIO 2
 OneWire oneWire(ONE_WIRE_BUS);
@@ -267,18 +267,17 @@ void publishSlowCookerState() {
       case SC_OFF: 
           mqttClient.publish(SlowCookerStateTopic, "OFF", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "OFF", true);
-          mqttClient.publish(SlowCookerTimeRemainingSensorTopic, "0", false);
           break;
       case SC_IN_DELAY: 
           mqttClient.publish(SlowCookerStateTopic, "DELAY", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
           break;
       case SC_IN_COOKING_OFF: 
-          mqttClient.publish(SlowCookerStateTopic, "OFFHEAT", true);
+          mqttClient.publish(SlowCookerStateTopic, "RESTING", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
           break;
       case SC_IN_COOKING_ON: 
-          mqttClient.publish(SlowCookerStateTopic, "ONHEAT", true);
+          mqttClient.publish(SlowCookerStateTopic, "HEATING", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
           break;
       default:
