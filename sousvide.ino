@@ -202,7 +202,7 @@ void toggleSlowCooker() {
   }
   else if ((foodTemp >= targetFoodTemp) || 
            ((slowCookerState == SC_IN_COOKING_ON || 
-             slowCookerState == SC_IN_COOKING_OFF) && (cookingEndTime <= now)) {
+             slowCookerState == SC_IN_COOKING_OFF) && cookingEndTime <= now)) {
       // turn off
       if (slowCookerState != SC_OFF) {
         last_slow_cooker_toggle_time = now;
