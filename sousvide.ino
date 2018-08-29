@@ -31,8 +31,8 @@ void mqttReconnect();
 
 //------- Replace the following! ------
 #define HOST "SlowCooker"
-#define SSID "CCHOME"       // your network SSID (name)
-#define PASSWORD "angela18"  // your network key
+#define SSID "XXXXX"       // your network SSID (name)
+#define PASSWORD "XXXXX"  // your network key
 #define DEVICE_NAME "slow_cooker"
 
 #define SC_OFF 0
