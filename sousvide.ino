@@ -355,8 +355,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       }
     }
     else if (pn == 1) {
-      if (slowCookerState != SC_OFF)
-        digitalWrite(0, HIGH);
+      if (slowCookerState != SC_OFF) 
+        return;
 
       pendingStatePublish = 1;
        
