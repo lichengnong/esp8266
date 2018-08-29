@@ -31,8 +31,8 @@ void mqttReconnect();
 
 //------- Replace the following! ------
 #define HOST "SlowCooker"
-#define SSID "XXXXX"       // your network SSID (name)
-#define PASSWORD "XXXXX"  // your network key
+#define SSID "CCHOME"       // your network SSID (name)
+#define PASSWORD "angela18"  // your network key
 #define DEVICE_NAME "slow_cooker"
 
 #define SC_OFF 0
@@ -107,6 +107,7 @@ void setup()
   //turn off slow cooker at the beginning
   digitalWrite(0, HIGH);
   slowCookerState = SC_OFF;
+  pendingStatePublish = 1;
 
   delay(10);
   
@@ -213,7 +214,7 @@ void toggleSlowCooker() {
   } 
   else if (slowCookerState == SC_IN_DELAY) {
       if (delayEndTime < now) {
-        cookingEndTime = targetCookingTime*60000 + now;
+        cookingEndTime = targetCookingTime + now;
         slowCookerState = SC_IN_COOKING_OFF;
         pendingStatePublish = 1;
       }
@@ -248,7 +249,7 @@ void publishSlowCookerState() {
      static unsigned long lastReportAttempt = 0;
      unsigned long now = millis();
      
-     if ((now - lastReportAttempt) > 60000) {
+     if (now < lastReportAttempt || (now - lastReportAttempt) > 10000) {
         lastReportAttempt = now;
 
         int timeRemaining = 0;
@@ -267,6 +268,7 @@ void publishSlowCookerState() {
       case SC_OFF: 
           mqttClient.publish(SlowCookerStateTopic, "OFF", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "OFF", true);
+          mqttClient.publish(SlowCookerSwitchCommandTopic, "0", true);
           break;
       case SC_IN_DELAY: 
           mqttClient.publish(SlowCookerStateTopic, "DELAY", true);
@@ -318,7 +320,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       DS18B20.setUserDataByIndex(index, index);
   }
   else if (!strcmp(topic, SlowCookerSetDelayTimeTopic)) {
-     targetDelayTime = pn*60*1000;
+     targetDelayTime = pn*60000;
 
      if (slowCookerState == SC_IN_COOKING_ON || slowCookerState == SC_IN_COOKING_OFF)
         return;
@@ -329,14 +331,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             pendingStatePublish = 1;
         }
         else
-          delayEndTime = targetDelayTime*60000 + now;
+          delayEndTime = targetDelayTime + now;
      }
   }
   else if (!strcmp(topic, SlowCookerSetCookingTimeTopic)) {
       targetCookingTime = pn*60000;
 
       if (slowCookerState == SC_IN_COOKING_OFF || SC_IN_COOKING_ON)
-         cookingEndTime = targetCookingTime*60000 + now;
+         cookingEndTime = targetCookingTime + now;
   }
   else if (!strcmp(topic, SlowCookerSetTargetCookingTempTopic)) {
       targetCookingTemp = pn;
@@ -355,16 +357,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (pn == 1) {
       if (slowCookerState != SC_OFF)
         digitalWrite(0, HIGH);
-      
+
+      pendingStatePublish = 1;
+       
       if (targetDelayTime > 0) {
           slowCookerState = SC_IN_DELAY;
-          delayEndTime = targetDelayTime*60000 + now;
-          pendingStatePublish = 1;
+          delayEndTime = targetDelayTime + now;
       }
       else {
         slowCookerState = SC_IN_COOKING_OFF;
-        cookingEndTime = targetCookingTime*60000 + now;
-        pendingStatePublish = 1;
+        cookingEndTime = targetCookingTime + now;
       }
     }
   }
@@ -373,7 +375,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void mqttReconnect() {
   static unsigned long lastReconnectAttempt = 0;
   unsigned long now = millis();
-  if ((now - lastReconnectAttempt) > 6000) {
+  if (now < lastReconnectAttempt || (now - lastReconnectAttempt) > 6000) {
     lastReconnectAttempt = now;
     
     if (!mqttClient.connected()) {
@@ -420,7 +422,7 @@ float getTempByID(int id)
 void readT() {
   static unsigned long lastReadAttempt = 0;
   unsigned long now = millis();
-  if ((now - lastReadAttempt) > 2000) {
+  if (now < lastReadAttempt || (now - lastReadAttempt) > 2000) {
     lastReadAttempt = now;
 
     //Serial.print("Requesting temperatures...");
@@ -451,4 +453,3 @@ void readT() {
     }
   }
 }
-
