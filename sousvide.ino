@@ -52,6 +52,16 @@ volatile unsigned long cookingEndTime = 0;
 
 volatile byte pendingStatePublish = 1;
 
+struct StoredData {
+  byte slowCookerState;
+  byte targetFoodTemp;
+  byte targetCookingTemp;
+  unsigned long remainingDelayTime;
+  unsigned long remainingCookingTime;
+};
+
+StoredData storedData;
+
 #define ONE_WIRE_BUS 2  // GPIO 2
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
@@ -104,6 +114,8 @@ void setup()
     T[index].id = DS18B20.getUserData(T[index].addr);
   }
 
+  EEPROM.begin(sizeof(StoredData));
+  
   //turn off slow cooker at the beginning
   digitalWrite(0, HIGH);
   slowCookerState = SC_OFF;
