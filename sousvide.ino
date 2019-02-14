@@ -52,12 +52,13 @@ volatile unsigned long cookingEndTime = 0;
 
 volatile byte pendingStatePublish = 1;
 
+#define STORED_DATA_EEPROM_ADDR 0
+
 struct StoredData {
   byte slowCookerState;
   byte targetFoodTemp;
   byte targetCookingTemp;
-  unsigned long remainingDelayTime;
-  unsigned long remainingCookingTime;
+  unsigned int remainingTime;
 };
 
 StoredData storedData;
@@ -92,6 +93,27 @@ PubSubClient mqttClient(wifiClient);
 #define SlowCookerTimeRemainingSensorTopic "home/slowcooker/timeremaining"
 #define SlowCookerSetupTopic "home/slowcooker/setup"
 
+void persistStoredData()
+{
+  storedData.slowCookerState = slowCookerState;
+  storedData.targetFoodTemp = targetFoodTemp;
+  storedData.targetCookingTemp = targetCookingTemp;
+
+  unsigned long now = millis();
+  unsigned int timeRemaining = 0;
+
+  if (getSlowCookerState() == SC_IN_DELAY)
+       timeRemaining = (delayEndTime > now ? delayEndTime - now : 0)/60000;
+  else if (getSlowCookerState() == SC_IN_COOKING_ON || getSlowCookerState() == SC_IN_COOKING_OFF)
+       timeRemaining = (cookingEndTime > now ? cookingEndTime - now : 0)/60000;
+  
+  storedData.remainingTime = timeRemaining;
+  
+  EEPROM.put(STORED_DATA_EEPROM_ADDR, storedData);
+
+  EEPROM.commit();
+}
+
 void setup()
 {
   pinMode(0, OUTPUT);
@@ -114,12 +136,32 @@ void setup()
     T[index].id = DS18B20.getUserData(T[index].addr);
   }
 
-  EEPROM.begin(sizeof(StoredData));
-  
   //turn off slow cooker at the beginning
   digitalWrite(0, HIGH);
-  slowCookerState = SC_OFF;
-  pendingStatePublish = 1;
+
+  EEPROM.begin(sizeof(StoredData));
+
+  EEPROM.get(STORED_DATA_EEPROM_ADDR, storedData);
+  
+  targetCookingTemp = storedData.targetCookingTemp;
+  targetFoodTemp = storedData.targetFoodTemp;
+  
+  if (storedData.slowCookerState != SC_OFF) {
+      pendingStatePublish = 1;
+       
+      if (storedData.slowCookerState == SC_IN_DELAY) {
+          slowCookerState = SC_IN_DELAY;
+          delayEndTime = storedData.remainingDelayTime + now;
+      }
+      else {
+        slowCookerState = SC_IN_COOKING_OFF;
+        cookingEndTime = storedData.remainingCookingTime + now;
+      }
+  }
+  else {
+      pendingStatePublish = 1;
+      slowCookerState = SC_OFF;
+  }
 
   delay(10);
   
@@ -205,24 +247,15 @@ void toggleSlowCooker() {
   unsigned long now = millis();
 
   if (isnan(cookingTemp) || isnan(foodTemp)) {
+      return;
+   }
+  else if ((slowCookerState == SC_IN_COOKING_ON || 
+            slowCookerState == SC_IN_COOKING_OFF) && cookingEndTime <= now) {
       // turn off
-      if (slowCookerState != SC_OFF) {
-        last_slow_cooker_toggle_time = now;
-        digitalWrite(0, HIGH);
-        slowCookerState = SC_OFF;
-        pendingStatePublish = 1;
-      }
-  }
-  else if ((foodTemp >= targetFoodTemp) || 
-           ((slowCookerState == SC_IN_COOKING_ON || 
-             slowCookerState == SC_IN_COOKING_OFF) && cookingEndTime <= now)) {
-      // turn off
-      if (slowCookerState != SC_OFF) {
-        last_slow_cooker_toggle_time = now;
-        digitalWrite(0, HIGH);
-        slowCookerState = SC_OFF;
-        pendingStatePublish = 1;
-      }
+      last_slow_cooker_toggle_time = now;
+      digitalWrite(0, HIGH);
+      slowCookerState = SC_OFF;
+      pendingStatePublish = 1;
   } 
   else if (slowCookerState == SC_IN_DELAY) {
       if (delayEndTime < now) {
@@ -232,7 +265,7 @@ void toggleSlowCooker() {
       }
   }
   else if (slowCookerState == SC_IN_COOKING_OFF) {
-      if (cookingTemp < (targetCookingTemp - 3)) {
+      if (cookingTemp < targetCookingTemp) {
         // turn on
         if (now - last_slow_cooker_toggle_time > 60000) {
           digitalWrite(0, LOW);
@@ -242,7 +275,7 @@ void toggleSlowCooker() {
       }
   }
   else if (slowCookerState == SC_IN_COOKING_ON) {
-      if (cookingTemp >= targetCookingTemp) {
+      if (cookingTemp >= targetCookingTemp || foodTemp >= targetFoodTemp) {
         // turn off
         last_slow_cooker_toggle_time = now;
         digitalWrite(0, HIGH);
@@ -259,12 +292,14 @@ int getSlowCookerState() {
 void publishSlowCookerState() {
   if (getSlowCookerState() != SC_OFF) {
      static unsigned long lastReportAttempt = 0;
+     static unsigned long lastStoredDataCommit = 0;
+    
      unsigned long now = millis();
      
      if (now < lastReportAttempt || (now - lastReportAttempt) > 10000) {
         lastReportAttempt = now;
 
-        int timeRemaining = 0;
+        unsigned int timeRemaining = 0;
         if (getSlowCookerState() == SC_IN_DELAY)
           timeRemaining = (delayEndTime > now ? delayEndTime - now : 0)/60000;
         else
