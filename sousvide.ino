@@ -95,7 +95,7 @@ PubSubClient mqttClient(wifiClient);
 
 void persistStoredData()
 {
-  storedData.slowCookerState = slowCookerState;
+  storedData.slowCookerState = getSlowCookerState();
   storedData.targetFoodTemp = targetFoodTemp;
   storedData.targetCookingTemp = targetCookingTemp;
 
@@ -151,11 +151,11 @@ void setup()
        
       if (storedData.slowCookerState == SC_IN_DELAY) {
           slowCookerState = SC_IN_DELAY;
-          delayEndTime = storedData.remainingDelayTime + now;
+          delayEndTime = storedData.remainingTime + now;
       }
       else {
         slowCookerState = SC_IN_COOKING_OFF;
-        cookingEndTime = storedData.remainingCookingTime + now;
+        cookingEndTime = storedData.remainingTime + now;
       }
   }
   else {
@@ -256,12 +256,14 @@ void toggleSlowCooker() {
       digitalWrite(0, HIGH);
       slowCookerState = SC_OFF;
       pendingStatePublish = 1;
+      persistStoredData();
   } 
   else if (slowCookerState == SC_IN_DELAY) {
       if (delayEndTime < now) {
         cookingEndTime = targetCookingTime + now;
         slowCookerState = SC_IN_COOKING_OFF;
         pendingStatePublish = 1;
+        persistStoredData();
       }
   }
   else if (slowCookerState == SC_IN_COOKING_OFF) {
@@ -306,6 +308,11 @@ void publishSlowCookerState() {
           timeRemaining = (cookingEndTime > now ? cookingEndTime - now : 0)/60000;
       
         mqttClient.publish(SlowCookerTimeRemainingSensorTopic, String(timeRemaining).c_str(), false);
+       
+       if (now < lastStoredDataCommit || (now - lastStoredDataCommit) > 600000) {
+          persistStoredData();
+          lastStoredDataCommit = now;
+       }
      }
   }
   
@@ -376,6 +383,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         if (pn == 0) {
             slowCookerState = SC_IN_COOKING_OFF;
             pendingStatePublish = 1;
+            persistStoredData();
         }
         else
           delayEndTime = targetDelayTime + now;
@@ -399,6 +407,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         slowCookerState = SC_OFF;
         digitalWrite(0, HIGH);
         pendingStatePublish = 1;
+        persistStoredData();
       }
     }
     else if (pn == 1) {
@@ -415,6 +424,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         slowCookerState = SC_IN_COOKING_OFF;
         cookingEndTime = targetCookingTime + now;
       }
+      
+      persistStoredData();
     }
   }
 }
