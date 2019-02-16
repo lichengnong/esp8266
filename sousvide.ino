@@ -151,11 +151,11 @@ void setup()
        
       if (storedData.slowCookerState == SC_IN_DELAY) {
           slowCookerState = SC_IN_DELAY;
-          delayEndTime = storedData.remainingTime + now;
+          delayEndTime = storedData.remainingTime*60000 + now;
       }
       else {
         slowCookerState = SC_IN_COOKING_OFF;
-        cookingEndTime = storedData.remainingTime + now;
+        cookingEndTime = storedData.remainingTime*60000 + now;
       }
   }
   else {
