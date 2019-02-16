@@ -31,8 +31,8 @@ void mqttReconnect();
 
 //------- Replace the following! ------
 #define HOST "SlowCooker"
-#define SSID "XXXXX"       // your network SSID (name)
-#define PASSWORD "XXXXX"  // your network key
+#define SSID "XXXXXX"       // your network SSID (name)
+#define PASSWORD "XXXXXX"  // your network key
 #define DEVICE_NAME "slow_cooker"
 
 #define SC_OFF 0
@@ -40,9 +40,9 @@ void mqttReconnect();
 #define SC_IN_COOKING_OFF 2
 #define SC_IN_COOKING_ON 3
 
-volatile byte slowCookerState = SC_OFF;
-volatile byte targetFoodTemp = 0;
-volatile byte targetCookingTemp = 0;
+volatile int slowCookerState = SC_OFF;
+volatile int targetFoodTemp = 0;
+volatile int targetCookingTemp = 0;
 volatile float cookingTemp;
 volatile float foodTemp;
 volatile unsigned long targetDelayTime = 0;
@@ -55,9 +55,11 @@ volatile byte pendingStatePublish = 1;
 #define STORED_DATA_EEPROM_ADDR 0
 
 struct StoredData {
-  byte slowCookerState;
-  byte targetFoodTemp;
-  byte targetCookingTemp;
+  int slowCookerState;
+  int targetFoodTemp;
+  int targetCookingTemp;
+  unsigned int targetDelayTime;
+  unsigned int targetCookingTime;
   unsigned int remainingTime;
 };
 
@@ -98,6 +100,8 @@ void persistStoredData()
   storedData.slowCookerState = getSlowCookerState();
   storedData.targetFoodTemp = targetFoodTemp;
   storedData.targetCookingTemp = targetCookingTemp;
+  storedData.targetDelayTime = targetDelayTime/60000;
+  storedData.targetCookingTime = targetCookingTime/60000;
 
   unsigned long now = millis();
   unsigned int timeRemaining = 0;
@@ -145,24 +149,25 @@ void setup()
   
   targetCookingTemp = storedData.targetCookingTemp;
   targetFoodTemp = storedData.targetFoodTemp;
-  
+  targetCookingTime = storedData.targetCookingTime*60000;
+  targetDelayTime = storedData.targetDelayTime*60000;
+
   if (storedData.slowCookerState != SC_OFF) {
-      pendingStatePublish = 1;
-       
+      unsigned long now = millis();
+      
       if (storedData.slowCookerState == SC_IN_DELAY) {
           slowCookerState = SC_IN_DELAY;
           delayEndTime = storedData.remainingTime*60000 + now;
       }
-      else {
+      else { 
         slowCookerState = SC_IN_COOKING_OFF;
         cookingEndTime = storedData.remainingTime*60000 + now;
       }
   }
   else {
-      pendingStatePublish = 1;
       slowCookerState = SC_OFF;
   }
-
+  
   delay(10);
   
   // Set WiFi to station mode and disconnect from an AP if it was Previously
@@ -247,8 +252,8 @@ void toggleSlowCooker() {
   unsigned long now = millis();
 
   if (isnan(cookingTemp) || isnan(foodTemp)) {
-      return;
-   }
+    return;
+  }
   else if ((slowCookerState == SC_IN_COOKING_ON || 
             slowCookerState == SC_IN_COOKING_OFF) && cookingEndTime <= now) {
       // turn off
@@ -269,7 +274,7 @@ void toggleSlowCooker() {
   else if (slowCookerState == SC_IN_COOKING_OFF) {
       if (cookingTemp < targetCookingTemp) {
         // turn on
-        if (now - last_slow_cooker_toggle_time > 60000) {
+        if (now - last_slow_cooker_toggle_time >10000) {
           digitalWrite(0, LOW);
           slowCookerState = SC_IN_COOKING_ON;
           pendingStatePublish = 1;
@@ -295,24 +300,24 @@ void publishSlowCookerState() {
   if (getSlowCookerState() != SC_OFF) {
      static unsigned long lastReportAttempt = 0;
      static unsigned long lastStoredDataCommit = 0;
-    
+      
      unsigned long now = millis();
      
      if (now < lastReportAttempt || (now - lastReportAttempt) > 10000) {
         lastReportAttempt = now;
 
-        unsigned int timeRemaining = 0;
+        int timeRemaining = 0;
         if (getSlowCookerState() == SC_IN_DELAY)
           timeRemaining = (delayEndTime > now ? delayEndTime - now : 0)/60000;
         else
           timeRemaining = (cookingEndTime > now ? cookingEndTime - now : 0)/60000;
       
         mqttClient.publish(SlowCookerTimeRemainingSensorTopic, String(timeRemaining).c_str(), false);
-       
-       if (now < lastStoredDataCommit || (now - lastStoredDataCommit) > 600000) {
-          persistStoredData();
+     }
+
+     if (now < lastStoredDataCommit || (now - lastStoredDataCommit) > 600000) {
           lastStoredDataCommit = now;
-       }
+          persistStoredData();
      }
   }
   
@@ -327,14 +332,17 @@ void publishSlowCookerState() {
       case SC_IN_DELAY: 
           mqttClient.publish(SlowCookerStateTopic, "DELAY", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          mqttClient.publish(SlowCookerSwitchCommandTopic, "1", true);
           break;
       case SC_IN_COOKING_OFF: 
           mqttClient.publish(SlowCookerStateTopic, "RESTING", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          mqttClient.publish(SlowCookerSwitchCommandTopic, "1", true);
           break;
       case SC_IN_COOKING_ON: 
           mqttClient.publish(SlowCookerStateTopic, "HEATING", true);
           mqttClient.publish(SlowCookerSwitchStateTopic, "ON", true);
+          mqttClient.publish(SlowCookerSwitchCommandTopic, "1", true);
           break;
       default:
           break;
@@ -424,7 +432,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         slowCookerState = SC_IN_COOKING_OFF;
         cookingEndTime = targetCookingTime + now;
       }
-      
+
       persistStoredData();
     }
   }
@@ -448,6 +456,15 @@ void mqttReconnect() {
       if (mqttClient.connect(clientId.c_str(), SlowCookerAvailabilityTopic, 0, true, "offline")) {
         Serial.println("connected");
 
+        mqttClient.publish(SlowCookerAvailabilityTopic, "online", true);
+       
+        pendingStatePublish = 1;
+        publishSlowCookerState();
+
+        yield(); 
+
+        delay(100);
+        
         mqttClient.subscribe(SlowCookerSetDelayTimeTopic);
         mqttClient.subscribe(SlowCookerSetCookingTimeTopic);
         mqttClient.subscribe(SlowCookerSetTargetFoodTempTopic);
@@ -455,9 +472,6 @@ void mqttReconnect() {
         mqttClient.subscribe(SlowCookerSwitchCommandTopic);
         mqttClient.subscribe(SlowCookerSetupTopic);
 
-        mqttClient.publish(SlowCookerAvailabilityTopic, "online", true);
-
-        pendingStatePublish = 1;
       } else {
         Serial.println("failed");
       }
